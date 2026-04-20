@@ -14,80 +14,82 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Fetch Farcaster data and calculate intensity
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install requests
+        run: pip install requests
+        
+      - name: Run intensity updater
         env:
           NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
-          echo "📡 Fetching Farcaster trending data..."
+          python3 << 'EOF'
+          import json, datetime, os, requests
           
-          # Check if API key exists
-          if [ -z "$NEYNAR_API_KEY" ]; then
-            echo "⚠️ No API key found, using fallback intensity"
-            INTENSITY=0.50
-          else
-            RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
-              -H "accept: application/json" \
-              -H "x-api-key: $NEYNAR_API_KEY")
-            
-            CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
-            LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
-            RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
-            
-            LIKE_SUM=${LIKE_SUM:-0}
-            RECAST_SUM=${RECAST_SUM:-0}
-            
-            echo "📊 Trending casts: $CAST_COUNT"
-            echo "❤️ Total likes: $LIKE_SUM"
-            echo "🔄 Total recasts: $RECAST_SUM"
-            
-            # Calculate intensity scores
-            if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.28
-            elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.22
-            elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.16
-            elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.10
-            else CAST_SCORE=0.05; fi
-            
-            if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.28
-            elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.22
-            elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.16
-            elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.10
-            else LIKE_SCORE=0.05; fi
-            
-            if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.24
-            elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.19
-            elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.14
-            elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.08
-            else RECAST_SCORE=0.04; fi
-            
-            RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
-            INTENSITY=$(echo "scale=3; 0.12 + $RAW_SCORE * 0.68" | bc)
-            INTENSITY=$(printf "%.3f" $INTENSITY)
-          fi
+          api_key = os.environ.get("NEYNAR_API_KEY")
           
-          echo "🎨 Final intensity: $INTENSITY"
+          if not api_key:
+              intensity = 0.50
+              casts = likes = recasts = 0
+          else:
+              try:
+                  url = "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h"
+                  headers = {"accept": "application/json", "x-api-key": api_key}
+                  response = requests.get(url, headers=headers, timeout=30)
+                  data = response.json()
+                  
+                  casts = len(data.get("casts", []))
+                  likes = sum(c.get("likes_count", 0) for c in data.get("casts", []))
+                  recasts = sum(c.get("recasts_count", 0) for c in data.get("casts", []))
+                  
+                  if casts >= 10: cast_score = 0.28
+                  elif casts >= 7: cast_score = 0.22
+                  elif casts >= 4: cast_score = 0.16
+                  elif casts >= 1: cast_score = 0.10
+                  else: cast_score = 0.05
+                  
+                  if likes >= 1000: like_score = 0.28
+                  elif likes >= 500: like_score = 0.22
+                  elif likes >= 200: like_score = 0.16
+                  elif likes >= 50: like_score = 0.10
+                  else: like_score = 0.05
+                  
+                  if recasts >= 200: recast_score = 0.24
+                  elif recasts >= 100: recast_score = 0.19
+                  elif recasts >= 50: recast_score = 0.14
+                  elif recasts >= 10: recast_score = 0.08
+                  else: recast_score = 0.04
+                  
+                  raw_score = cast_score + like_score + recast_score
+                  intensity = round(0.12 + (raw_score * 0.68), 3)
+              except Exception as e:
+                  print(f"Error: {e}")
+                  intensity = 0.50
+                  casts = likes = recasts = 0
           
-          # Write JSON
-          cat > intensity.json << EOF
-{
-  "intensity": $INTENSITY,
-  "date": "$(date +%Y-%m-%d)",
-  "timestamp": $(date +%s)000,
-  "updatedAt": "$(date)",
-  "source": "farcaster-80pct",
-  "metrics": {
-    "casts": ${CAST_COUNT:-0},
-    "likes": ${LIKE_SUM:-0},
-    "recasts": ${RECAST_SUM:-0}
-  }
-}
-EOF
+          output = {
+              "intensity": intensity,
+              "date": datetime.datetime.now().strftime("%Y-%m-%d"),
+              "timestamp": int(datetime.datetime.now().timestamp() * 1000),
+              "updatedAt": datetime.datetime.now().strftime("%a %b %d %H:%M:%S UTC %Y"),
+              "source": "farcaster-80pct",
+              "metrics": {"casts": casts, "likes": likes, "recasts": recasts}
+          }
           
-          cat intensity.json
+          with open("intensity.json", "w") as f:
+              json.dump(output, f, indent=2)
+              f.write("\n")
+          
+          print(f"✅ Intensity updated to: {intensity}")
+          EOF
           
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update intensity $(date +%Y-%m-%d) [skip ci]" || echo "No changes"
+          git commit -m "Update intensity [skip ci]" || echo "No changes"
           git push origin main
