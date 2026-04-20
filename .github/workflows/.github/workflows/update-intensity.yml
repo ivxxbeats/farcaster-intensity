@@ -1,0 +1,81 @@
+name: Update Daily Intensity
+on:
+  schedule:
+    - cron: '20 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Fetch and calculate intensity
+        env:
+          NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
+        run: |
+          echo "📡 Fetching Farcaster data..."
+          
+          RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
+            -H "accept: application/json" \
+            -H "x-api-key: $NEYNAR_API_KEY")
+          
+          CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
+          LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+          RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+          
+          LIKE_SUM=${LIKE_SUM:-0}
+          RECAST_SUM=${RECAST_SUM:-0}
+          
+          echo "📊 Casts: $CAST_COUNT"
+          echo "❤️ Likes: $LIKE_SUM"
+          echo "🔄 Recasts: $RECAST_SUM"
+          
+          # Ultra-low intensity formula (max 0.25)
+          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.08
+          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.06
+          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.04
+          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.02
+          else CAST_SCORE=0.01; fi
+          
+          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.08
+          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.06
+          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.04
+          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.02
+          else LIKE_SCORE=0.01; fi
+          
+          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.04
+          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.03
+          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.02
+          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.01
+          else RECAST_SCORE=0.005; fi
+          
+          RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
+          INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
+          
+          echo "🎨 Final intensity: $INTENSITY"
+          
+          cat > intensity.json << EOF
+          {
+            "intensity": $INTENSITY,
+            "date": "$(date +%Y-%m-%d)",
+            "timestamp": $(date +%s)000,
+            "updatedAt": "$(date)",
+            "source": "farcaster"
+          }
+          EOF
+          
+          cat intensity.json
+          
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add intensity.json
+          git commit -m "Update daily intensity [skip ci]" || echo "No changes"
+          git push origin main
