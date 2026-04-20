@@ -36,37 +36,29 @@ jobs:
           echo "❤️ Likes: $LIKE_SUM"
           echo "🔄 Recasts: $RECAST_SUM"
           
-          # ============================================================
-          # LOWER INTENSITY FORMULA - MAX INTENSITY 0.35
-          # ============================================================
+          # Ultra-low intensity formula
+          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.08
+          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.06
+          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.04
+          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.02
+          else CAST_SCORE=0.01; fi
           
-          # Cast volume scores (reduced by 50%)
-          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.04
-          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.03
-          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.02
-          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.01
-          else CAST_SCORE=0.005; fi
+          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.08
+          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.06
+          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.04
+          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.02
+          else LIKE_SCORE=0.01; fi
           
-          # Like volume scores (reduced by 50%)
-          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.04
-          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.03
-          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.02
-          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.01
-          else LIKE_SCORE=0.005; fi
-          
-          # Recast volume scores (reduced by 50%)
-          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.02
-          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.015
-          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.01
-          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.005
-          else RECAST_SCORE=0.002; fi
+          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.04
+          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.03
+          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.02
+          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.01
+          else RECAST_SCORE=0.005; fi
           
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
+          INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
           
-          # Map to range: 0.05 to 0.35 (much lower ceiling)
-          INTENSITY=$(echo "scale=3; 0.05 + $RAW_SCORE * 0.30" | bc)
-          
-          # Ensure leading zero
+          # Format with leading zero
           INTENSITY=$(echo $INTENSITY | awk '{printf "%.3f", $0}')
           
           echo "🎨 Final intensity: $INTENSITY"
@@ -85,13 +77,12 @@ jobs:
 }
 EOF
           
-          echo "✅ intensity.json created:"
           cat intensity.json
           
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
-          git config.user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add intensity.json
           git diff --cached --quiet || git commit -m "Update daily intensity [skip ci]"
           git push origin main
