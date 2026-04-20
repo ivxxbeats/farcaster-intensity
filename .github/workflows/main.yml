@@ -78,7 +78,7 @@ jobs:
             echo "📝 No changes to commit"
           else
             git commit -m "Update daily intensity [skip ci]"
-            # Pull latest changes and rebase
+            # Pull latest changes before pushing (rebase to avoid conflicts)
             git pull --rebase origin main
             git push
             echo "✅ Pushed changes"
