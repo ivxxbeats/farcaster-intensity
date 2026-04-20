@@ -15,15 +15,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Fetch Farcaster activity
+      - name: Fetch Farcaster activity with reactions
         env:
           NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
-          echo "🔑 Testing API key..."
+          echo "🔑 Fetching Farcaster data with reactions..."
           
-          # Try trending feed endpoint (confirmed working)
-          echo "📡 Fetching trending feed..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
+          # Fetch trending feed with reaction data
+          RESPONSE=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/feed/trending?limit=20&time_window=24h" \
             -H "accept: application/json" \
             -H "x-api-key: $NEYNAR_API_KEY" 2>&1)
           
@@ -32,36 +31,130 @@ jobs:
           
           echo "HTTP Status: $HTTP_CODE"
           
-          if [ "$HTTP_CODE" = "200" ]; then
+          if [ "$CODE" = "200" ]; then
             echo "✅ API call successful!"
             
-            # Count trending casts as activity metric
+            # Count total trending casts
             CAST_COUNT=$(echo "$BODY" | grep -o '"hash"' | wc -l)
-            echo "📊 Trending casts count: $CAST_COUNT"
             
-            # Calculate intensity based on trending activity (0-100 scale)
-            if [ $CAST_COUNT -gt 50 ]; then
-              INTENSITY=0.95
-            elif [ $CAST_COUNT -gt 30 ]; then
-              INTENSITY=0.80
-            elif [ $CAST_COUNT -gt 15 ]; then
-              INTENSITY=0.65
-            elif [ $CAST_COUNT -gt 5 ]; then
-              INTENSITY=0.45
+            # Calculate total reactions (likes + recasts) from trending casts
+            # Sum all like counts from the first 10 casts as a sample
+            LIKE_SUM=0
+            RECAST_SUM=0
+            
+            # Extract like counts
+            for i in $(seq 1 10); do
+              LIKE=$(echo "$BODY" | grep -o '"likes_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
+              RECAST=$(echo "$BODY" | grep -o '"recasts_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
+              LIKE_SUM=$((LIKE_SUM + ${LIKE:-0}))
+              RECAST_SUM=$((RECAST_SUM + ${RECAST:-0}))
+            done
+            
+            TOTAL_REACTIONS=$((LIKE_SUM + RECAST_SUM))
+            
+            echo "📊 Trending casts: $CAST_COUNT"
+            echo "❤️ Total likes (sample): $LIKE_SUM"
+            echo "🔄 Total recasts (sample): $RECAST_SUM"
+            echo "⚡ Total reactions: $TOTAL_REACTIONS"
+            
+            # Calculate engagement per cast (reactions / casts)
+            if [ $CAST_COUNT -gt 0 ]; then
+              ENGAGEMENT=$(echo "scale=2; $TOTAL_REACTIONS / $CAST_COUNT" | bc)
             else
-              INTENSITY=0.25
+              ENGAGEMENT=1.0
             fi
-          else
-            echo "⚠️ API returned $HTTP_CODE, using time-based fallback"
+            echo "📈 Engagement per cast: $ENGAGEMENT"
+            
+            # ============================================================
+            # ENGAGEMENT NORMALIZATION (30% lower thresholds)
+            # ============================================================
+            # Engagement range: 0.3 (very low) to 3.5 (very high) - 30% lower
+            ENGAGEMENT_MIN=0.3
+            ENGAGEMENT_MAX=3.5
+            
+            if (( $(echo "$ENGAGEMENT < $ENGAGEMENT_MIN" | bc -l) )); then
+              ENGAGEMENT_NORM=0
+            elif (( $(echo "$ENGAGEMENT > $ENGAGEMENT_MAX" | bc -l) )); then
+              ENGAGEMENT_NORM=1
+            else
+              ENGAGEMENT_NORM=$(echo "scale=3; ($ENGAGEMENT - $ENGAGEMENT_MIN) / ($ENGAGEMENT_MAX - $ENGAGEMENT_MIN)" | bc)
+            fi
+            
+            # Apply exponential curve (faster early rise)
+            ENGAGEMENT_NORM=$(echo "scale=3; e(0.6*l($ENGAGEMENT_NORM))" | bc -l 2>/dev/null || echo $ENGAGEMENT_NORM)
+            echo "📊 Engagement normalized: $ENGAGEMENT_NORM"
+            
+            # ============================================================
+            # CAST VOLUME NORMALIZATION (30% lower thresholds)
+            # ============================================================
+            CASTS_MIN=30
+            CASTS_MAX=350
+            
+            if [ $CAST_COUNT -lt $CASTS_MIN ]; then
+              CAST_NORM=0
+            elif [ $CAST_COUNT -gt $CASTS_MAX ]; then
+              CAST_NORM=1
+            else
+              CAST_NORM=$(echo "scale=3; ($CAST_COUNT - $CASTS_MIN) / ($CASTS_MAX - $CASTS_MIN)" | bc)
+            fi
+            CAST_NORM=$(echo "scale=3; e(0.6*l($CAST_NORM))" | bc -l 2>/dev/null || echo $CAST_NORM)
+            echo "📊 Cast volume normalized: $CAST_NORM"
+            
+            # ============================================================
+            # WEIGHTED INTENSITY (Engagement = 40% weight)
+            # ============================================================
+            # Give engagement higher weight since it shows quality
+            WEIGHT_ENGAGEMENT=0.40   # 40% weight on reactions
+            WEIGHT_CASTS=0.35        # 35% weight on cast volume
+            WEIGHT_TRENDING=0.25     # 25% weight on trending status
+            
+            # Trending boost: if casts > 50, add bonus
+            if [ $CAST_COUNT -gt 50 ]; then
+              TRENDING_BOOST=0.3
+            elif [ $CAST_COUNT -gt 20 ]; then
+              TRENDING_BOOST=0.15
+            else
+              TRENDING_BOOST=0
+            fi
+            
+            RAW_INTENSITY=$(echo "scale=3; ($ENGAGEMENT_NORM * $WEIGHT_ENGAGEMENT) + ($CAST_NORM * $WEIGHT_CASTS) + $TRENDING_BOOST * $WEIGHT_TRENDING" | bc)
+            echo "📊 Raw intensity: $RAW_INTENSITY"
+            
+            # ============================================================
+            # APPLY 50% REDUCED SENSITIVITY + 2-WEEK RAMP
+            # ============================================================
+            # Map to 0.05-0.95 range (50% less sensitive)
+            INTENSITY=$(echo "scale=3; 0.05 + $RAW_INTENSITY * 0.45" | bc)
+            
+            # 2-week ramp factor (days 1-14 increase 0-25%)
             DAY=$(date +%d)
-            INTENSITY=$(echo "scale=3; 0.05 + ($DAY / 31) * 0.90" | bc)
+            DAY=$((10#$DAY))
+            if [ $DAY -le 14 ]; then
+              RAMP_FACTOR=$(echo "scale=3; 1 + ($DAY / 14) * 0.25" | bc)
+            else
+              RAMP_FACTOR=1.25
+            fi
+            INTENSITY=$(echo "scale=3; $INTENSITY * $RAMP_FACTOR" | bc)
+            
+            # Apply reduced sensitivity boost (1.15x instead of 1.3x)
+            INTENSITY=$(echo "scale=3; 0.05 + ($INTENSITY - 0.05) * 1.15" | bc)
+            
+            # Clamp
+            if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
+            if (( $(echo "$INTENSITY < 0.05" | bc -l) )); then INTENSITY=0.05; fi
+            
+            echo "🎨 Final intensity: $INTENSITY"
+            
+          else
+            echo "⚠️ API failed, using time-based fallback"
+            DAY=$(date +%d)
+            DAY=$((10#$DAY))
+            INTENSITY=$(echo "scale=3; 0.05 + ($DAY / 31) * 0.45" | bc)
+            if [ $DAY -le 14 ]; then
+              RAMP_FACTOR=$(echo "scale=3; 1 + ($DAY / 14) * 0.25" | bc)
+              INTENSITY=$(echo "scale=3; $INTENSITY * $RAMP_FACTOR" | bc)
+            fi
           fi
-          
-          # Apply 30% sensitivity boost
-          INTENSITY=$(echo "scale=3; 0.05 + ($INTENSITY - 0.05) * 1.3" | bc)
-          if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
-          
-          echo "🎨 Final intensity: $INTENSITY"
           
           cat > intensity.json << EOF
           {
@@ -69,7 +162,14 @@ jobs:
             "date": "$(date +%Y-%m-%d)",
             "timestamp": $(date +%s)000,
             "updatedAt": "$(date)",
-            "source": "trending-feed"
+            "source": "trending-feed-with-reactions",
+            "metrics": {
+              "trendingCasts": $CAST_COUNT,
+              "totalReactions": $TOTAL_REACTIONS,
+              "engagementPerCast": $ENGAGEMENT,
+              "engagementNorm": $ENGAGEMENT_NORM,
+              "dayOfMonth": $DAY
+            }
           }
           EOF
           
@@ -83,7 +183,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "📝 No changes to commit"
           else
-            git commit -m "Update daily intensity [skip ci]"
+            git commit -m "Update daily intensity with reactions [skip ci]"
             git pull --rebase origin main
             git push
             echo "✅ Pushed changes"
