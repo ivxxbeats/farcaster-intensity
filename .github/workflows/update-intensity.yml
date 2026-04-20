@@ -1,9 +1,9 @@
 name: Update Intensity
 
 on:
-  workflow_dispatch:  # Manual trigger only - for testing
+  workflow_dispatch:
   schedule:
-    - cron: '20 22 * * *'  # Daily at 22:20 UTC
+    - cron: '20 22 * * *'
 
 permissions:
   contents: write
@@ -14,9 +14,74 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Create test intensity
+      - name: Fetch Farcaster data and calculate intensity
+        env:
+          NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
-          echo '{"intensity": 0.75, "date": "'$(date +%Y-%m-%d)'"}' > intensity.json
+          echo "📡 Fetching Farcaster trending data..."
+          
+          # Check if API key exists
+          if [ -z "$NEYNAR_API_KEY" ]; then
+            echo "⚠️ No API key found, using fallback intensity"
+            INTENSITY=0.50
+          else
+            RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
+              -H "accept: application/json" \
+              -H "x-api-key: $NEYNAR_API_KEY")
+            
+            CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
+            LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+            RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+            
+            LIKE_SUM=${LIKE_SUM:-0}
+            RECAST_SUM=${RECAST_SUM:-0}
+            
+            echo "📊 Trending casts: $CAST_COUNT"
+            echo "❤️ Total likes: $LIKE_SUM"
+            echo "🔄 Total recasts: $RECAST_SUM"
+            
+            # Calculate intensity scores
+            if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.28
+            elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.22
+            elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.16
+            elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.10
+            else CAST_SCORE=0.05; fi
+            
+            if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.28
+            elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.22
+            elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.16
+            elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.10
+            else LIKE_SCORE=0.05; fi
+            
+            if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.24
+            elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.19
+            elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.14
+            elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.08
+            else RECAST_SCORE=0.04; fi
+            
+            RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
+            INTENSITY=$(echo "scale=3; 0.12 + $RAW_SCORE * 0.68" | bc)
+            INTENSITY=$(printf "%.3f" $INTENSITY)
+          fi
+          
+          echo "🎨 Final intensity: $INTENSITY"
+          
+          # Write JSON
+          cat > intensity.json << EOF
+{
+  "intensity": $INTENSITY,
+  "date": "$(date +%Y-%m-%d)",
+  "timestamp": $(date +%s)000,
+  "updatedAt": "$(date)",
+  "source": "farcaster-80pct",
+  "metrics": {
+    "casts": ${CAST_COUNT:-0},
+    "likes": ${LIKE_SUM:-0},
+    "recasts": ${RECAST_SUM:-0}
+  }
+}
+EOF
+          
           cat intensity.json
           
       - name: Commit and push
@@ -24,5 +89,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update intensity [skip ci]" || echo "No changes"
+          git commit -m "Update intensity $(date +%Y-%m-%d) [skip ci]" || echo "No changes"
           git push origin main
