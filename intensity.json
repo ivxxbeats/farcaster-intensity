@@ -1,14 +1,7 @@
 {
-  "intensity": .340,
+  "intensity": .500,
   "date": "2026-04-20",
-  "timestamp": 1776663990000,
-  "updatedAt": "Mon Apr 20 05:46:30 UTC 2026",
-  "source": "trending-feed-with-reactions",
-  "metrics": {
-    "trendingCasts": ,
-    "totalReactions": ,
-    "engagementPerCast": ,
-    "engagementNorm": ,
-    "dayOfMonth": 20
-  }
+  "timestamp": 1776664536000,
+  "updatedAt": "Mon Apr 20 05:55:36 UTC 2026",
+  "source": "neynar-trending"
 }
