@@ -1,7 +1,12 @@
 {
-  "intensity": 0.102,
+  "intensity": .670,
   "date": "2026-04-20",
-  "timestamp": 1776699595000,
-  "updatedAt": "Mon Apr 20 15:39:55 UTC 2026",
-  "source": "farcaster-api"
+  "timestamp": 1776706571000,
+  "updatedAt": "Mon Apr 20 17:36:11 UTC 2026",
+  "source": "farcaster-strong",
+  "metrics": {
+    "casts": 14,
+    "likes": 320,
+    "recasts": 46
+  }
 }
