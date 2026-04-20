@@ -58,14 +58,6 @@ jobs:
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
           INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
           
-          DAY=$(date +%d)
-          DAY=$((10#$DAY))
-          if [ $DAY -le 14 ]; then RAMP=$(echo "scale=3; 1 + ($DAY / 14) * 0.15" | bc)
-          else RAMP=1.15; fi
-          
-          INTENSITY=$(echo "scale=3; $INTENSITY * $RAMP" | bc)
-          if (( $(echo "$INTENSITY > 0.28" | bc -l) )); then INTENSITY=0.28; fi
-          
           echo "🎨 Final intensity: $INTENSITY"
           
           cat > intensity.json << EOF
