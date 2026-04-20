@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Fetch all history to avoid rebase conflicts
+          fetch-depth: 0
           
       - name: Fetch Farcaster trending feed
         env:
@@ -31,119 +33,106 @@ jobs:
             # Count casts
             CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
             
-            # Sum likes and recasts correctly
+            # Sum likes and recasts
             LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
             RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
             
             LIKE_SUM=${LIKE_SUM:-0}
             RECAST_SUM=${RECAST_SUM:-0}
-            TOTAL_REACTIONS=$((LIKE_SUM + RECAST_SUM))
-            
-            # Calculate AVERAGE engagement per cast (not sum)
-            if [ $CAST_COUNT -gt 0 ]; then
-              AVG_ENGAGEMENT=$(echo "scale=2; $TOTAL_REACTIONS / $CAST_COUNT" | bc)
-            else
-              AVG_ENGAGEMENT=1.0
-            fi
             
             echo "📊 Trending casts: $CAST_COUNT"
             echo "❤️ Total likes: $LIKE_SUM"
             echo "🔄 Total recasts: $RECAST_SUM"
-            echo "📈 Avg engagement per cast: $AVG_ENGAGEMENT"
             
             # ============================================================
-            # ULTRA LOW SENSITIVITY FORMULA (70% reduction from original)
+            # MUCH LOWER INTENSITY FORMULA
+            # Max intensity is now 0.25 (instead of 0.50)
             # ============================================================
             
-            # Cast volume score (0-10 scale) - very low impact
+            # Cast volume score (max 0.12)
             if [ $CAST_COUNT -gt 8 ]; then
-              VOLUME_SCORE=0.15
+              VOLUME_SCORE=0.12
             elif [ $CAST_COUNT -gt 5 ]; then
-              VOLUME_SCORE=0.10
+              VOLUME_SCORE=0.08
             elif [ $CAST_COUNT -gt 2 ]; then
-              VOLUME_SCORE=0.05
+              VOLUME_SCORE=0.04
             else
               VOLUME_SCORE=0.02
             fi
             
-            # Engagement score (0-10 scale) - very low impact
-            if (( $(echo "$AVG_ENGAGEMENT > 8.0" | bc -l) )); then
-              ENGAGE_SCORE=0.15
-            elif (( $(echo "$AVG_ENGAGEMENT > 5.0" | bc -l) )); then
-              ENGAGE_SCORE=0.10
-            elif (( $(echo "$AVG_ENGAGEMENT > 2.0" | bc -l) )); then
-              ENGAGE_SCORE=0.05
+            # Engagement score (max 0.12)
+            # Use reactions as a proxy (likes+recasts)
+            if [ $LIKE_SUM -gt 500 ]; then
+              ENGAGE_SCORE=0.12
+            elif [ $LIKE_SUM -gt 200 ]; then
+              ENGAGE_SCORE=0.08
+            elif [ $LIKE_SUM -gt 50 ]; then
+              ENGAGE_SCORE=0.04
             else
               ENGAGE_SCORE=0.02
             fi
             
-            # Combined score (max 0.30)
+            # Combined score (max 0.24)
             RAW_SCORE=$(echo "scale=3; ($VOLUME_SCORE + $ENGAGE_SCORE) / 2" | bc)
             
-            # Map to narrow range: 0.10 to 0.40 (much lower ceiling)
-            INTENSITY=$(echo "scale=3; 0.10 + $RAW_SCORE * 0.30" | bc)
+            # Map to range: 0.08 to 0.25 (much lower!)
+            INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
             
             # ============================================================
-            # 2-WEEK RAMP-UP (gradual increase over month)
+            # 2-WEEK RAMP-UP (0-20% increase)
             # ============================================================
             DAY=$(date +%d)
             DAY=$((10#$DAY))
             
             if [ $DAY -le 14 ]; then
-              # Day 1: 0% increase, Day 14: 30% increase
-              RAMP_FACTOR=$(echo "scale=3; 1 + ($DAY / 14) * 0.30" | bc)
-              echo "📈 Ramp factor: ${RAMP_FACTOR}x (+$(echo "scale=0; ($DAY / 14) * 30" | bc)%)"
+              RAMP_FACTOR=$(echo "scale=3; 1 + ($DAY / 14) * 0.20" | bc)
             else
-              # After day 14: full 30% increase
-              RAMP_FACTOR=1.30
-              echo "📈 Ramp factor: 1.30x (+30%)"
+              RAMP_FACTOR=1.20
             fi
             
             # Apply ramp-up
             INTENSITY=$(echo "scale=3; $INTENSITY * $RAMP_FACTOR" | bc)
             
-            # Final clamp to safe range
-            if (( $(echo "$INTENSITY > 0.60" | bc -l) )); then INTENSITY=0.60; fi
-            if (( $(echo "$INTENSITY < 0.10" | bc -l) )); then INTENSITY=0.10; fi
+            # Final clamp (never exceed 0.30)
+            if (( $(echo "$INTENSITY > 0.30" | bc -l) )); then INTENSITY=0.30; fi
+            if (( $(echo "$INTENSITY < 0.08" | bc -l) )); then INTENSITY=0.08; fi
             
+            echo "📅 Day $DAY → Ramp factor: ${RAMP_FACTOR}x"
             echo "🎨 Final intensity: $INTENSITY"
             
           else
             echo "⚠️ API failed, using time-based fallback"
             DAY=$(date +%d)
             DAY=$((10#$DAY))
-            INTENSITY=$(echo "scale=3; 0.10 + ($DAY / 31) * 0.30" | bc)
+            INTENSITY=$(echo "scale=3; 0.08 + ($DAY / 31) * 0.17" | bc)
             echo "📅 Fallback intensity: $INTENSITY"
           fi
           
+          # Overwrite file completely (avoid merge conflicts)
           cat > intensity.json << EOF
           {
             "intensity": $INTENSITY,
             "date": "$(date +%Y-%m-%d)",
             "timestamp": $(date +%s)000,
             "updatedAt": "$(date)",
-            "source": "neynar-trending",
-            "metrics": {
-              "casts": $CAST_COUNT,
-              "avgEngagement": $AVG_ENGAGEMENT,
-              "dayOfMonth": $DAY
-            }
+            "source": "neynar-trending"
           }
           EOF
           
           echo "✅ intensity.json created:"
           cat intensity.json
           
-      - name: Commit and push
+      - name: Commit and push (force overwrite to avoid conflicts)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add intensity.json
-          if git diff --staged --quiet; then
-            echo "📝 No changes to commit"
-          else
-            git commit -m "Update daily intensity [skip ci]"
-            git pull --rebase origin main
-            git push
-            echo "✅ Pushed changes"
-          fi
+          
+          # Force add and commit (overwrite conflicts)
+          git add -f intensity.json
+          git commit -m "Update daily intensity [skip ci]" || echo "No changes to commit"
+          
+          # Pull with rebase and then push
+          git pull --rebase origin main --strategy-option=theirs || true
+          git push origin main
+          
+          echo "✅ Pushed changes"
