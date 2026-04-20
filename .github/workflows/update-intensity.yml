@@ -36,26 +36,19 @@ jobs:
           echo "❤️ Total likes: $LIKE_SUM"
           echo "🔄 Total recasts: $RECAST_SUM"
           
-          # ============================================================
-          # STRONGER FORMULA - REDUCED BY 20%
-          # Range: 0.12 to 0.80 (20% lower ceiling)
-          # ============================================================
-          
-          # Cast volume score (reduced by 20%)
+          # Calculate intensity scores
           if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.28
           elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.22
           elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.16
           elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.10
           else CAST_SCORE=0.05; fi
           
-          # Like volume score (reduced by 20%)
           if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.28
           elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.22
           elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.16
           elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.10
           else LIKE_SCORE=0.05; fi
           
-          # Recast volume score (reduced by 20%)
           if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.24
           elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.19
           elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.14
@@ -63,31 +56,38 @@ jobs:
           else RECAST_SCORE=0.04; fi
           
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
-          
-          # Map to 0.12 - 0.80 range (20% lower across the board)
           INTENSITY=$(echo "scale=3; 0.12 + $RAW_SCORE * 0.68" | bc)
           
-          # Ensure valid range
-          if (( $(echo "$INTENSITY > 0.80" | bc -l) )); then INTENSITY=0.80; fi
-          if (( $(echo "$INTENSITY < 0.12" | bc -l) )); then INTENSITY=0.12; fi
+          echo "🎨 Raw intensity: $INTENSITY"
           
-          echo "🎨 Final intensity: $INTENSITY"
+          # Use Python to write JSON (handles formatting perfectly)
+          python3 << EOF
+import json
+import datetime
+
+intensity = float($INTENSITY)
+data = {
+    "intensity": intensity,
+    "date": "$(date +%Y-%m-%d)",
+    "timestamp": $(date +%s)000,
+    "updatedAt": "$(date)",
+    "source": "farcaster-80pct",
+    "metrics": {
+        "casts": $CAST_COUNT,
+        "likes": $LIKE_SUM,
+        "recasts": $RECAST_SUM
+    }
+}
+
+with open("intensity.json", "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+
+print("✅ JSON written successfully")
+EOF
           
-          cat > intensity.json << EOF
-          {
-            "intensity": $INTENSITY,
-            "date": "$(date +%Y-%m-%d)",
-            "timestamp": $(date +%s)000,
-            "updatedAt": "$(date)",
-            "source": "farcaster-80pct",
-            "metrics": {
-              "casts": $CAST_COUNT,
-              "likes": $LIKE_SUM,
-              "recasts": $RECAST_SUM
-            }
-          }
-          EOF
-          
+          echo ""
+          echo "📄 Final intensity.json:"
           cat intensity.json
           
       - name: Commit and push
@@ -95,5 +95,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update intensity from Farcaster [skip ci]" || echo "No changes"
-          git push origin HEAD:main
+          git commit -m "Update intensity" || echo "No changes"
+          git push
