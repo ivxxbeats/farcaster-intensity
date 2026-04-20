@@ -17,17 +17,19 @@ jobs:
         run: |
           INTENSITY="0.103"
           DATE=$(date +%Y-%m-%d)
+          TIMESTAMP=$(date +%s)000
+          UPDATED_AT=$(date)
           
-          cat > intensity.json << EOF
-          {
-            "intensity": $INTENSITY,
-            "date": "$DATE",
-            "timestamp": $(date +%s)000,
-            "updatedAt": "$(date)",
-            "source": "farcaster"
-          }
-          EOF
+          # Use printf to ensure proper number formatting
+          printf '{\n' > intensity.json
+          printf '  "intensity": 0.103,\n' >> intensity.json
+          printf '  "date": "%s",\n' "$DATE" >> intensity.json
+          printf '  "timestamp": %s,\n' "$TIMESTAMP" >> intensity.json
+          printf '  "updatedAt": "%s",\n' "$UPDATED_AT" >> intensity.json
+          printf '  "source": "farcaster"\n' >> intensity.json
+          printf '}\n' >> intensity.json
           
+          echo "Created intensity.json:"
           cat intensity.json
           
       - name: Commit and push
@@ -35,5 +37,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update daily intensity [skip ci]" || exit 0
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+          git diff --staged --quiet || git commit -m "Update daily intensity [skip ci]"
+          git push origin main
