@@ -15,7 +15,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Fetch and update intensity
+      - name: Fetch and update intensity from multiple endpoints
         env:
           NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
@@ -26,35 +26,170 @@ jobs:
           fi
           echo "✅ API key found"
           
-          echo "📡 Fetching Farcaster stats..."
+          # Initialize variables
+          INTENSITY=0.50
+          SUCCESS=false
           
-          RESPONSE=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/stats" \
+          # ============================================================
+          # ENDPOINT 1: Feed Stats
+          # ============================================================
+          echo ""
+          echo "📡 [1/4] Trying Neynar Feed Stats endpoint..."
+          RESPONSE1=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/feed/stats" \
+            -H "accept: application/json" \
             -H "x-api-key: $NEYNAR_API_KEY" 2>&1)
           
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
+          HTTP_CODE1=$(echo "$RESPONSE1" | tail -n1)
+          BODY1=$(echo "$RESPONSE1" | sed '$d')
           
-          echo "HTTP Status: $HTTP_CODE"
+          echo "HTTP Status: $HTTP_CODE1"
           
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "⚠️ API returned $HTTP_CODE, using fallback intensity"
-            INTENSITY=0.50
-          else
-            echo "✅ API call successful"
-            CASTS=$(echo "$BODY" | grep -o '"cast_count_24h":[0-9]*' | grep -o '[0-9]*')
-            USERS=$(echo "$BODY" | grep -o '"active_users_24h":[0-9]*' | grep -o '[0-9]*')
+          if [ "$HTTP_CODE1" = "200" ]; then
+            echo "✅ Feed Stats endpoint successful!"
+            CASTS=$(echo "$BODY1" | grep -o '"casts":[0-9]*' | head -1 | grep -o '[0-9]*')
+            USERS=$(echo "$BODY1" | grep -o '"users":[0-9]*' | head -1 | grep -o '[0-9]*')
+            LIKES=$(echo "$BODY1" | grep -o '"likes":[0-9]*' | head -1 | grep -o '[0-9]*')
+            RECASTS=$(echo "$BODY1" | grep -o '"recasts":[0-9]*' | head -1 | grep -o '[0-9]*')
             
             CASTS=${CASTS:-50000}
             USERS=${USERS:-40000}
+            LIKES=${LIKES:-0}
+            RECASTS=${RECASTS:-0}
             
+            # Calculate engagement
+            if [ $CASTS -gt 0 ]; then
+              ENGAGEMENT=$(echo "scale=2; ($LIKES + $RECASTS) / $CASTS" | bc)
+            else
+              ENGAGEMENT=1.5
+            fi
+            
+            echo "📊 Casts: $CASTS, Users: $USERS, Engagement: $ENGAGEMENT"
+            
+            # Calculate intensity (30% lower thresholds: 350k max casts)
             if [ $CASTS -gt 350000 ]; then
               INTENSITY=0.95
             else
               INTENSITY=$(echo "scale=3; 0.05 + ($CASTS / 350000) * 0.90" | bc)
             fi
-            echo "📊 Casts: $CASTS, Users: $USERS, Intensity: $INTENSITY"
+            SUCCESS=true
+          else
+            echo "⚠️ Feed Stats endpoint failed (HTTP $HTTP_CODE1)"
           fi
           
+          # ============================================================
+          # ENDPOINT 2: Trending Feed
+          # ============================================================
+          if [ "$SUCCESS" = false ]; then
+            echo ""
+            echo "📡 [2/4] Trying Neynar Trending Feed endpoint..."
+            RESPONSE2=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/feed/trending?limit=20" \
+              -H "accept: application/json" \
+              -H "x-api-key: $NEYNAR_API_KEY" 2>&1)
+            
+            HTTP_CODE2=$(echo "$RESPONSE2" | tail -n1)
+            BODY2=$(echo "$RESPONSE2" | sed '$d')
+            
+            echo "HTTP Status: $HTTP_CODE2"
+            
+            if [ "$HTTP_CODE2" = "200" ]; then
+              echo "✅ Trending Feed endpoint successful!"
+              # Count casts in trending feed
+              CAST_COUNT=$(echo "$BODY2" | grep -o '"hash"' | wc -l)
+              # Get like/recast activity from first few casts
+              LIKE_SAMPLE=$(echo "$BODY2" | grep -o '"reactions":[^}]*}' | head -5)
+              
+              echo "📊 Trending casts count: $CAST_COUNT"
+              
+              # Calculate intensity based on trending activity (0-100 scale)
+              if [ $CAST_COUNT -gt 50 ]; then
+                INTENSITY=0.95
+              elif [ $CAST_COUNT -gt 30 ]; then
+                INTENSITY=0.80
+              elif [ $CAST_COUNT -gt 15 ]; then
+                INTENSITY=0.65
+              elif [ $CAST_COUNT -gt 5 ]; then
+                INTENSITY=0.45
+              else
+                INTENSITY=0.25
+              fi
+              SUCCESS=true
+            else
+              echo "⚠️ Trending Feed endpoint failed (HTTP $HTTP_CODE2)"
+            fi
+          fi
+          
+          # ============================================================
+          # ENDPOINT 3: User Stats (using top users as proxy)
+          # ============================================================
+          if [ "$SUCCESS" = false ]; then
+            echo ""
+            echo "📡 [3/4] Trying Neynar User Stats endpoint..."
+            # Fetch top users to gauge activity
+            RESPONSE3=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/user/trending?limit=10" \
+              -H "accept: application/json" \
+              -H "x-api-key: $NEYNAR_API_KEY" 2>&1)
+            
+            HTTP_CODE3=$(echo "$RESPONSE3" | tail -n1)
+            BODY3=$(echo "$RESPONSE3" | sed '$d')
+            
+            echo "HTTP Status: $HTTP_CODE3"
+            
+            if [ "$HTTP_CODE3" = "200" ]; then
+              echo "✅ User Stats endpoint successful!"
+              # Count followers from top users as activity metric
+              FOLLOWER_COUNT=$(echo "$BODY3" | grep -o '"follower_count":[0-9]*' | head -3 | grep -o '[0-9]*' | paste -sd+ - | bc)
+              FOLLOWER_COUNT=${FOLLOWER_COUNT:-0}
+              
+              echo "📊 Sample follower count: $FOLLOWER_COUNT"
+              
+              # Calculate intensity (scale: 0-1M followers range)
+              if [ $FOLLOWER_COUNT -gt 500000 ]; then
+                INTENSITY=0.95
+              elif [ $FOLLOWER_COUNT -gt 200000 ]; then
+                INTENSITY=0.75
+              elif [ $FOLLOWER_COUNT -gt 50000 ]; then
+                INTENSITY=0.55
+              elif [ $FOLLOWER_COUNT -gt 10000 ]; then
+                INTENSITY=0.35
+              else
+                INTENSITY=0.20
+              fi
+              SUCCESS=true
+            else
+              echo "⚠️ User Stats endpoint failed (HTTP $HTTP_CODE3)"
+            fi
+          fi
+          
+          # ============================================================
+          # ENDPOINT 4: Time-based Fallback (no API needed)
+          # ============================================================
+          if [ "$SUCCESS" = false ]; then
+            echo ""
+            echo "📡 [4/4] All API endpoints failed, using time-based fallback..."
+            DAY=$(date +%d)
+            HOUR=$(date +%H)
+            # Intensity varies by day of month (1-31) and hour
+            DAY_INTENSITY=$(echo "scale=3; $DAY / 31" | bc)
+            HOUR_MOD=$(echo "scale=3; ($HOUR / 24) * 0.2" | bc)
+            INTENSITY=$(echo "scale=3; 0.05 + ($DAY_INTENSITY * 0.85) + $HOUR_MOD" | bc)
+            if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
+            if (( $(echo "$INTENSITY < 0.05" | bc -l) )); then INTENSITY=0.05; fi
+            echo "📅 Day $DAY, Hour $HOUR → Intensity: $INTENSITY"
+          fi
+          
+          # ============================================================
+          # Apply 30% Sensitivity Boost to all intensities
+          # ============================================================
+          echo ""
+          echo "⚡ Applying 30% sensitivity boost..."
+          RAW_INTENSITY=$INTENSITY
+          INTENSITY=$(echo "scale=3; 0.05 + ($INTENSITY - 0.05) * 1.3" | bc)
+          if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
+          echo "📈 Intensity: $RAW_INTENSITY → $INTENSITY (after +30%)"
+          
+          # ============================================================
+          # Create JSON output
+          # ============================================================
           DATE=$(date +%Y-%m-%d)
           
           cat > intensity.json << EOF
@@ -62,11 +197,14 @@ jobs:
             "intensity": $INTENSITY,
             "date": "$DATE",
             "timestamp": $(date +%s)000,
-            "updatedAt": "$(date)"
+            "updatedAt": "$(date)",
+            "source": "farcaster-multi-endpoint",
+            "success": $SUCCESS
           }
           EOF
           
-          echo "✅ intensity.json created"
+          echo ""
+          echo "✅ intensity.json created:"
           cat intensity.json
           
       - name: Commit and push
@@ -78,7 +216,6 @@ jobs:
             echo "📝 No changes to commit"
           else
             git commit -m "Update daily intensity [skip ci]"
-            # Pull latest changes before pushing (rebase to avoid conflicts)
             git pull --rebase origin main
             git push
             echo "✅ Pushed changes"
