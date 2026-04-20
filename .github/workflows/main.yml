@@ -28,7 +28,6 @@ jobs:
           
           echo "📡 Fetching Farcaster stats..."
           
-          # Make the API request with error handling
           RESPONSE=$(curl -s -w "\n%{http_code}" "https://api.neynar.com/v2/farcaster/stats" \
             -H "x-api-key: $NEYNAR_API_KEY" 2>&1)
           
@@ -40,18 +39,14 @@ jobs:
           if [ "$HTTP_CODE" != "200" ]; then
             echo "⚠️ API returned $HTTP_CODE, using fallback intensity"
             INTENSITY=0.50
-            DATE=$(date +%Y-%m-%d)
           else
             echo "✅ API call successful"
-            # Simple intensity calculation (you can make this more complex later)
             CASTS=$(echo "$BODY" | grep -o '"cast_count_24h":[0-9]*' | grep -o '[0-9]*')
             USERS=$(echo "$BODY" | grep -o '"active_users_24h":[0-9]*' | grep -o '[0-9]*')
             
-            # Fallback if values not found
             CASTS=${CASTS:-50000}
             USERS=${USERS:-40000}
             
-            # Simple formula: intensity based on cast volume (0-350k range)
             if [ $CASTS -gt 350000 ]; then
               INTENSITY=0.95
             else
@@ -60,7 +55,8 @@ jobs:
             echo "📊 Casts: $CASTS, Users: $USERS, Intensity: $INTENSITY"
           fi
           
-          # Create the JSON file
+          DATE=$(date +%Y-%m-%d)
+          
           cat > intensity.json << EOF
           {
             "intensity": $INTENSITY,
@@ -82,6 +78,8 @@ jobs:
             echo "📝 No changes to commit"
           else
             git commit -m "Update daily intensity [skip ci]"
+            # Pull latest changes and rebase
+            git pull --rebase origin main
             git push
             echo "✅ Pushed changes"
           fi
