@@ -16,98 +16,37 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Fetch Farcaster data
-        env:
-          NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
-          echo "🔑 Fetching Farcaster data..."
+          echo "📡 Fetching Farcaster data from public Hub API..."
           
-          # Simple working endpoint - no parameters that might cause 400
-          echo "📡 Calling trending feed API..."
-          RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending" \
-            -H "accept: application/json" \
-            -H "x-api-key: $NEYNAR_API_KEY")
+          # Use public Farcaster Hub API (no API key needed)
+          RESPONSE=$(curl -s "https://hub.farcaster.com/v1/castsByFid?fid=1&pageSize=100" 2>&1)
           
-          HTTP_CODE=$?
-          
-          if [ $HTTP_CODE -eq 0 ] && [ -n "$RESPONSE" ]; then
-            echo "✅ API call successful!"
-            
-            # Count trending casts
+          if [ $? -eq 0 ] && [ -n "$RESPONSE" ]; then
+            # Count casts as activity metric
             CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
+            echo "📊 Recent casts from fid=1: $CAST_COUNT"
             
-            # Calculate reactions from first 10 casts
-            LIKE_SUM=0
-            RECAST_SUM=0
-            
-            for i in $(seq 1 10); do
-              LIKE=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
-              RECAST=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
-              LIKE_SUM=$((LIKE_SUM + ${LIKE:-0}))
-              RECAST_SUM=$((RECAST_SUM + ${RECAST:-0}))
-            done
-            
-            TOTAL_REACTIONS=$((LIKE_SUM + RECAST_SUM))
-            
-            echo "📊 Trending casts: $CAST_COUNT"
-            echo "❤️ Total likes (sample): $LIKE_SUM"
-            echo "🔄 Total recasts (sample): $RECAST_SUM"
-            echo "⚡ Total reactions: $TOTAL_REACTIONS"
-            
-            # Calculate engagement
-            if [ $CAST_COUNT -gt 0 ]; then
-              ENGAGEMENT=$(echo "scale=2; $TOTAL_REACTIONS / $CAST_COUNT" | bc)
+            # Use cast count as intensity metric (0-100 range)
+            if [ $CAST_COUNT -gt 80 ]; then
+              INTENSITY=0.95
+            elif [ $CAST_COUNT -gt 60 ]; then
+              INTENSITY=0.75
+            elif [ $CAST_COUNT -gt 40 ]; then
+              INTENSITY=0.55
+            elif [ $CAST_COUNT -gt 20 ]; then
+              INTENSITY=0.35
             else
-              ENGAGEMENT=1.0
-            fi
-            echo "📈 Engagement per cast: $ENGAGEMENT"
-            
-            # Calculate intensity with reactions
-            # Formula: engagement (0-3.5 range) contributes 50%
-            # cast volume (0-350 range) contributes 50%
-            
-            # Engagement component (50% weight)
-            if (( $(echo "$ENGAGEMENT > 3.5" | bc -l) )); then
-              ENGAGEMENT_SCORE=0.50
-            elif (( $(echo "$ENGAGEMENT < 0.3" | bc -l) )); then
-              ENGAGEMENT_SCORE=0
-            else
-              ENGAGEMENT_SCORE=$(echo "scale=3; ($ENGAGEMENT - 0.3) / 3.2 * 0.50" | bc)
+              INTENSITY=0.20
             fi
             
-            # Cast component (50% weight)
-            if [ $CAST_COUNT -gt 350 ]; then
-              CAST_SCORE=0.50
-            elif [ $CAST_COUNT -lt 30 ]; then
-              CAST_SCORE=0
-            else
-              CAST_SCORE=$(echo "scale=3; ($CAST_COUNT - 30) / 320 * 0.50" | bc)
-            fi
-            
-            RAW_INTENSITY=$(echo "scale=3; $ENGAGEMENT_SCORE + $CAST_SCORE" | bc)
-            
-            # Apply 2-week ramp (0-25% increase)
-            DAY=$(date +%d)
-            DAY=$((10#$DAY))
-            if [ $DAY -le 14 ]; then
-              RAMP=$(echo "scale=3; 1 + ($DAY / 14) * 0.25" | bc)
-            else
-              RAMP=1.25
-            fi
-            
-            INTENSITY=$(echo "scale=3; 0.05 + $RAW_INTENSITY * 0.90 * $RAMP" | bc)
-            
-            # Clamp
-            if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
-            if (( $(echo "$INTENSITY < 0.05" | bc -l) )); then INTENSITY=0.05; fi
-            
-            echo "🎨 Final intensity: $INTENSITY"
-            
+            echo "🎨 Intensity based on activity: $INTENSITY"
           else
-            echo "⚠️ API failed, using time-based fallback"
+            echo "⚠️ Hub API failed, using time-based intensity"
             DAY=$(date +%d)
             DAY=$((10#$DAY))
             INTENSITY=$(echo "scale=3; 0.05 + ($DAY / 31) * 0.90" | bc)
-            echo "📅 Fallback intensity: $INTENSITY"
+            echo "📅 Time-based intensity: $INTENSITY"
           fi
           
           cat > intensity.json << EOF
@@ -116,11 +55,11 @@ jobs:
             "date": "$(date +%Y-%m-%d)",
             "timestamp": $(date +%s)000,
             "updatedAt": "$(date)",
-            "source": "trending-feed"
+            "source": "farcaster-hub"
           }
           EOF
           
-          echo "✅ intensity.json created:"
+          echo "✅ intensity.json created"
           cat intensity.json
           
       - name: Commit and push
