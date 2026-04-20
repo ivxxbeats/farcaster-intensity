@@ -1,7 +1,14 @@
 {
-  "intensity": .830,
+  "intensity": .340,
   "date": "2026-04-20",
-  "timestamp": 1776663646000,
-  "updatedAt": "Mon Apr 20 05:40:46 UTC 2026",
-  "source": "trending-feed"
+  "timestamp": 1776663990000,
+  "updatedAt": "Mon Apr 20 05:46:30 UTC 2026",
+  "source": "trending-feed-with-reactions",
+  "metrics": {
+    "trendingCasts": ,
+    "totalReactions": ,
+    "engagementPerCast": ,
+    "engagementNorm": ,
+    "dayOfMonth": 20
+  }
 }
