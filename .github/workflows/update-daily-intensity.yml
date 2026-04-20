@@ -58,23 +58,31 @@ jobs:
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
           INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
           
-          # FORCE leading zero format (0.XXX instead of .XXX)
-          INTENSITY=$(printf "%.3f" $INTENSITY)
+          echo "🎨 Raw intensity: $INTENSITY"
           
-          echo "🎨 Final intensity: $INTENSITY"
-          
-          # Write JSON with proper formatting (no trailing spaces, valid numbers)
-          cat > intensity.json << EOF
-{
-  "intensity": $INTENSITY,
-  "date": "$(date +%Y-%m-%d)",
-  "timestamp": $(date +%s)000,
-  "updatedAt": "$(date)",
-  "source": "farcaster"
+          # Use Python to ensure valid JSON
+          python3 << EOF
+import json
+import datetime
+
+intensity = float($INTENSITY)
+data = {
+    "intensity": intensity,
+    "date": "$(date +%Y-%m-%d)",
+    "timestamp": $(date +%s)000,
+    "updatedAt": "$(date)",
+    "source": "farcaster"
 }
+
+with open("intensity.json", "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+
+print("✅ intensity.json created with Python")
 EOF
           
-          echo "✅ intensity.json created:"
+          echo ""
+          echo "📄 Final intensity.json:"
           cat intensity.json
           
       - name: Commit and push
@@ -82,5 +90,5 @@ EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update daily intensity [skip ci]" || echo "No changes"
+          git diff --cached --quiet || git commit -m "Update daily intensity [skip ci]"
           git push origin main
