@@ -1,5 +1,7 @@
 name: Update Daily Intensity
 on:
+  schedule:
+    - cron: '20 22 * * *'
   workflow_dispatch:
 
 permissions:
@@ -10,10 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
       - name: Create intensity file
         run: |
-          # Simple intensity calculation (0.103 for testing)
           INTENSITY="0.103"
           DATE=$(date +%Y-%m-%d)
           TIMESTAMP=$(date +%s)000
@@ -23,7 +26,7 @@ jobs:
   \"date\": \"$DATE\",
   \"timestamp\": $TIMESTAMP,
   \"updatedAt\": \"$(date)\",
-  \"source\": \"test\"
+  \"source\": \"farcaster\"
 }" > intensity.json
           
           cat intensity.json
@@ -33,5 +36,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update intensity" || echo "No changes"
-          git push
+          git commit -m "Update daily intensity [skip ci]" || echo "No changes"
+          git push origin main
