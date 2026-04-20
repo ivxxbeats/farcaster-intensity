@@ -15,84 +15,83 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Fetch Farcaster data and calculate intensity
+      - name: Fetch and calculate intensity
         env:
           NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
-          echo "📡 Fetching real Farcaster data from Neynar API..."
+          echo "📡 Fetching Farcaster data..."
           
-          # Call the actual Neynar API
           RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
             -H "accept: application/json" \
             -H "x-api-key: $NEYNAR_API_KEY")
           
-          # Check if API call succeeded
-          if echo "$RESPONSE" | grep -q '"casts"'; then
-            echo "✅ API call successful!"
-            
-            # Extract metrics
-            CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
-            LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
-            RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
-            
-            LIKE_SUM=${LIKE_SUM:-0}
-            RECAST_SUM=${RECAST_SUM:-0}
-            
-            echo "📊 Trending casts: $CAST_COUNT"
-            echo "❤️ Total likes: $LIKE_SUM"
-            echo "🔄 Total recasts: $RECAST_SUM"
-            
-            # Ultra-low intensity formula (max 0.25)
-            if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.08
-            elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.06
-            elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.04
-            elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.02
-            else CAST_SCORE=0.01; fi
-            
-            if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.08
-            elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.06
-            elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.04
-            elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.02
-            else LIKE_SCORE=0.01; fi
-            
-            if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.04
-            elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.03
-            elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.02
-            elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.01
-            else RECAST_SCORE=0.005; fi
-            
-            RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
-            INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
-            
-            echo "🎨 Calculated intensity from Farcaster: $INTENSITY"
-          else
-            echo "⚠️ API failed, using fallback intensity"
-            INTENSITY="0.103"
-          fi
+          CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
+          LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+          RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
           
-          # Ensure proper formatting
+          LIKE_SUM=${LIKE_SUM:-0}
+          RECAST_SUM=${RECAST_SUM:-0}
+          
+          echo "📊 Casts: $CAST_COUNT"
+          echo "❤️ Likes: $LIKE_SUM"
+          echo "🔄 Recasts: $RECAST_SUM"
+          
+          # ============================================================
+          # LOWER INTENSITY FORMULA - MAX INTENSITY 0.35
+          # ============================================================
+          
+          # Cast volume scores (reduced by 50%)
+          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.04
+          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.03
+          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.02
+          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.01
+          else CAST_SCORE=0.005; fi
+          
+          # Like volume scores (reduced by 50%)
+          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.04
+          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.03
+          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.02
+          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.01
+          else LIKE_SCORE=0.005; fi
+          
+          # Recast volume scores (reduced by 50%)
+          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.02
+          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.015
+          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.01
+          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.005
+          else RECAST_SCORE=0.002; fi
+          
+          RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
+          
+          # Map to range: 0.05 to 0.35 (much lower ceiling)
+          INTENSITY=$(echo "scale=3; 0.05 + $RAW_SCORE * 0.30" | bc)
+          
+          # Ensure leading zero
           INTENSITY=$(echo $INTENSITY | awk '{printf "%.3f", $0}')
-          DATE=$(date +%Y-%m-%d)
-          TIMESTAMP=$(date +%s)000
-          UPDATED_AT=$(date)
+          
+          echo "🎨 Final intensity: $INTENSITY"
           
           # Write JSON
-          printf '{\n' > intensity.json
-          printf '  "intensity": %s,\n' "$INTENSITY" >> intensity.json
-          printf '  "date": "%s",\n' "$DATE" >> intensity.json
-          printf '  "timestamp": %s,\n' "$TIMESTAMP" >> intensity.json
-          printf '  "updatedAt": "%s",\n' "$UPDATED_AT" >> intensity.json
-          printf '  "source": "farcaster-api"\n' >> intensity.json
-          printf '}\n' >> intensity.json
+          DATE=$(date +%Y-%m-%d)
+          TIMESTAMP=$(date +%s)000
           
-          echo ""
-          echo "📄 Final intensity.json:"
+          cat > intensity.json << EOF
+{
+  "intensity": $INTENSITY,
+  "date": "$DATE",
+  "timestamp": $TIMESTAMP,
+  "updatedAt": "$(date)",
+  "source": "farcaster"
+}
+EOF
+          
+          echo "✅ intensity.json created:"
           cat intensity.json
           
       - name: Commit and push
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config.user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git diff --staged --quiet || git commit -m "Update daily intensity from Farcaster API [skip ci]"
+          git diff --cached --quiet || git commit -m "Update daily intensity [skip ci]"
           git push origin main
