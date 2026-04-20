@@ -36,6 +36,7 @@ jobs:
           echo "❤️ Likes: $LIKE_SUM"
           echo "🔄 Recasts: $RECAST_SUM"
           
+          # Ultra-low intensity formula (max 0.25)
           if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.08
           elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.06
           elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.04
@@ -57,18 +58,23 @@ jobs:
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
           INTENSITY=$(echo "scale=3; 0.08 + $RAW_SCORE * 0.17" | bc)
           
+          # FORCE leading zero format (0.XXX instead of .XXX)
+          INTENSITY=$(printf "%.3f" $INTENSITY)
+          
           echo "🎨 Final intensity: $INTENSITY"
           
+          # Write JSON with proper formatting (no trailing spaces, valid numbers)
           cat > intensity.json << EOF
-          {
-            "intensity": $INTENSITY,
-            "date": "$(date +%Y-%m-%d)",
-            "timestamp": $(date +%s)000,
-            "updatedAt": "$(date)",
-            "source": "farcaster"
-          }
-          EOF
+{
+  "intensity": $INTENSITY,
+  "date": "$(date +%Y-%m-%d)",
+  "timestamp": $(date +%s)000,
+  "updatedAt": "$(date)",
+  "source": "farcaster"
+}
+EOF
           
+          echo "✅ intensity.json created:"
           cat intensity.json
           
       - name: Commit and push
