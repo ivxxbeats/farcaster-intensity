@@ -37,50 +37,49 @@ jobs:
           echo "🔄 Total recasts: $RECAST_SUM"
           
           # ============================================================
-          # STRONGER FORMULA - More sensitive to Farcaster activity
-          # Range: 0.15 to 0.95 (higher baseline, higher ceiling)
+          # STRONGER FORMULA - REDUCED BY 20%
+          # Range: 0.12 to 0.80 (20% lower ceiling)
           # ============================================================
           
-          # Cast volume score (0-0.35 range)
-          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.35
-          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.28
-          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.20
-          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.12
-          else CAST_SCORE=0.06; fi
+          # Cast volume score (reduced by 20%)
+          if [ $CAST_COUNT -ge 10 ]; then CAST_SCORE=0.28
+          elif [ $CAST_COUNT -ge 7 ]; then CAST_SCORE=0.22
+          elif [ $CAST_COUNT -ge 4 ]; then CAST_SCORE=0.16
+          elif [ $CAST_COUNT -ge 1 ]; then CAST_SCORE=0.10
+          else CAST_SCORE=0.05; fi
           
-          # Like volume score (0-0.35 range)
-          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.35
-          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.28
-          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.20
-          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.12
-          else LIKE_SCORE=0.06; fi
+          # Like volume score (reduced by 20%)
+          if [ $LIKE_SUM -ge 1000 ]; then LIKE_SCORE=0.28
+          elif [ $LIKE_SUM -ge 500 ]; then LIKE_SCORE=0.22
+          elif [ $LIKE_SUM -ge 200 ]; then LIKE_SCORE=0.16
+          elif [ $LIKE_SUM -ge 50 ]; then LIKE_SCORE=0.10
+          else LIKE_SCORE=0.05; fi
           
-          # Recast volume score (0-0.30 range)
-          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.30
-          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.24
-          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.18
-          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.10
-          else RECAST_SCORE=0.05; fi
+          # Recast volume score (reduced by 20%)
+          if [ $RECAST_SUM -ge 200 ]; then RECAST_SCORE=0.24
+          elif [ $RECAST_SUM -ge 100 ]; then RECAST_SCORE=0.19
+          elif [ $RECAST_SUM -ge 50 ]; then RECAST_SCORE=0.14
+          elif [ $RECAST_SUM -ge 10 ]; then RECAST_SCORE=0.08
+          else RECAST_SCORE=0.04; fi
           
           RAW_SCORE=$(echo "scale=3; $CAST_SCORE + $LIKE_SCORE + $RECAST_SCORE" | bc)
           
-          # Map to 0.15 - 0.95 range (stronger baseline and ceiling)
-          INTENSITY=$(echo "scale=3; 0.15 + $RAW_SCORE * 0.80" | bc)
+          # Map to 0.12 - 0.80 range (20% lower across the board)
+          INTENSITY=$(echo "scale=3; 0.12 + $RAW_SCORE * 0.68" | bc)
           
           # Ensure valid range
-          if (( $(echo "$INTENSITY > 0.95" | bc -l) )); then INTENSITY=0.95; fi
-          if (( $(echo "$INTENSITY < 0.15" | bc -l) )); then INTENSITY=0.15; fi
+          if (( $(echo "$INTENSITY > 0.80" | bc -l) )); then INTENSITY=0.80; fi
+          if (( $(echo "$INTENSITY < 0.12" | bc -l) )); then INTENSITY=0.12; fi
           
           echo "🎨 Final intensity: $INTENSITY"
           
-          # Write JSON
           cat > intensity.json << EOF
           {
             "intensity": $INTENSITY,
             "date": "$(date +%Y-%m-%d)",
             "timestamp": $(date +%s)000,
             "updatedAt": "$(date)",
-            "source": "farcaster-strong",
+            "source": "farcaster-80pct",
             "metrics": {
               "casts": $CAST_COUNT,
               "likes": $LIKE_SUM,
