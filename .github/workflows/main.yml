@@ -21,79 +21,98 @@ jobs:
         run: |
           echo "📡 Fetching Farcaster trending feed..."
           
-          # Correct parameters: limit=10 (max), time_window=24h
           RESPONSE=$(curl -s "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h" \
             -H "accept: application/json" \
             -H "x-api-key: $NEYNAR_API_KEY")
           
-          HTTP_CODE=$?
-          
-          if [ $HTTP_CODE -eq 0 ] && [ -n "$RESPONSE" ] && [ "$RESPONSE" != "{}" ]; then
+          if [ -n "$RESPONSE" ] && [ "$RESPONSE" != "{}" ]; then
             echo "✅ API call successful!"
             
-            # Count casts in response
+            # Count casts
             CAST_COUNT=$(echo "$RESPONSE" | grep -o '"hash"' | wc -l)
-            echo "📊 Trending casts (last 24h): $CAST_COUNT"
             
-            # Extract engagement metrics
-            LIKE_SUM=0
-            RECAST_SUM=0
+            # Sum likes and recasts correctly
+            LIKE_SUM=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
+            RECAST_SUM=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | grep -o '[0-9]*' | awk '{sum+=$1} END {print sum}')
             
-            for i in $(seq 1 $CAST_COUNT); do
-              LIKE=$(echo "$RESPONSE" | grep -o '"likes_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
-              RECAST=$(echo "$RESPONSE" | grep -o '"recasts_count":[0-9]*' | head -$i | tail -1 | grep -o '[0-9]*')
-              LIKE_SUM=$((LIKE_SUM + ${LIKE:-0}))
-              RECAST_SUM=$((RECAST_SUM + ${RECAST:-0}))
-            done
-            
+            LIKE_SUM=${LIKE_SUM:-0}
+            RECAST_SUM=${RECAST_SUM:-0}
             TOTAL_REACTIONS=$((LIKE_SUM + RECAST_SUM))
             
+            # Calculate AVERAGE engagement per cast (not sum)
             if [ $CAST_COUNT -gt 0 ]; then
-              ENGAGEMENT=$(echo "scale=2; $TOTAL_REACTIONS / $CAST_COUNT" | bc)
+              AVG_ENGAGEMENT=$(echo "scale=2; $TOTAL_REACTIONS / $CAST_COUNT" | bc)
             else
-              ENGAGEMENT=1.0
+              AVG_ENGAGEMENT=1.0
             fi
             
+            echo "📊 Trending casts: $CAST_COUNT"
             echo "❤️ Total likes: $LIKE_SUM"
             echo "🔄 Total recasts: $RECAST_SUM"
-            echo "📈 Engagement per cast: $ENGAGEMENT"
+            echo "📈 Avg engagement per cast: $AVG_ENGAGEMENT"
             
-            # Calculate intensity (0.05 - 0.95)
-            # Base on cast volume (0-10 casts scale)
+            # ============================================================
+            # ULTRA LOW SENSITIVITY FORMULA (70% reduction from original)
+            # ============================================================
+            
+            # Cast volume score (0-10 scale) - very low impact
             if [ $CAST_COUNT -gt 8 ]; then
-              VOLUME_SCORE=0.50
+              VOLUME_SCORE=0.15
             elif [ $CAST_COUNT -gt 5 ]; then
-              VOLUME_SCORE=0.35
-            elif [ $CAST_COUNT -gt 2 ]; then
-              VOLUME_SCORE=0.20
-            else
               VOLUME_SCORE=0.10
-            fi
-            
-            # Engagement score (0-3.5 scale)
-            if (( $(echo "$ENGAGEMENT > 3.0" | bc -l) )); then
-              ENGAGE_SCORE=0.50
-            elif (( $(echo "$ENGAGEMENT > 2.0" | bc -l) )); then
-              ENGAGE_SCORE=0.35
-            elif (( $(echo "$ENGAGEMENT > 1.0" | bc -l) )); then
-              ENGAGE_SCORE=0.20
+            elif [ $CAST_COUNT -gt 2 ]; then
+              VOLUME_SCORE=0.05
             else
-              ENGAGE_SCORE=0.10
+              VOLUME_SCORE=0.02
             fi
             
-            # Combined score (50% volume, 50% engagement)
+            # Engagement score (0-10 scale) - very low impact
+            if (( $(echo "$AVG_ENGAGEMENT > 8.0" | bc -l) )); then
+              ENGAGE_SCORE=0.15
+            elif (( $(echo "$AVG_ENGAGEMENT > 5.0" | bc -l) )); then
+              ENGAGE_SCORE=0.10
+            elif (( $(echo "$AVG_ENGAGEMENT > 2.0" | bc -l) )); then
+              ENGAGE_SCORE=0.05
+            else
+              ENGAGE_SCORE=0.02
+            fi
+            
+            # Combined score (max 0.30)
             RAW_SCORE=$(echo "scale=3; ($VOLUME_SCORE + $ENGAGE_SCORE) / 2" | bc)
             
-            # Map to 0.05-0.95 range
-            INTENSITY=$(echo "scale=3; 0.05 + $RAW_SCORE * 0.90" | bc)
+            # Map to narrow range: 0.10 to 0.40 (much lower ceiling)
+            INTENSITY=$(echo "scale=3; 0.10 + $RAW_SCORE * 0.30" | bc)
+            
+            # ============================================================
+            # 2-WEEK RAMP-UP (gradual increase over month)
+            # ============================================================
+            DAY=$(date +%d)
+            DAY=$((10#$DAY))
+            
+            if [ $DAY -le 14 ]; then
+              # Day 1: 0% increase, Day 14: 30% increase
+              RAMP_FACTOR=$(echo "scale=3; 1 + ($DAY / 14) * 0.30" | bc)
+              echo "📈 Ramp factor: ${RAMP_FACTOR}x (+$(echo "scale=0; ($DAY / 14) * 30" | bc)%)"
+            else
+              # After day 14: full 30% increase
+              RAMP_FACTOR=1.30
+              echo "📈 Ramp factor: 1.30x (+30%)"
+            fi
+            
+            # Apply ramp-up
+            INTENSITY=$(echo "scale=3; $INTENSITY * $RAMP_FACTOR" | bc)
+            
+            # Final clamp to safe range
+            if (( $(echo "$INTENSITY > 0.60" | bc -l) )); then INTENSITY=0.60; fi
+            if (( $(echo "$INTENSITY < 0.10" | bc -l) )); then INTENSITY=0.10; fi
             
             echo "🎨 Final intensity: $INTENSITY"
             
           else
-            echo "⚠️ API returned error, using time-based fallback"
+            echo "⚠️ API failed, using time-based fallback"
             DAY=$(date +%d)
             DAY=$((10#$DAY))
-            INTENSITY=$(echo "scale=3; 0.05 + ($DAY / 31) * 0.90" | bc)
+            INTENSITY=$(echo "scale=3; 0.10 + ($DAY / 31) * 0.30" | bc)
             echo "📅 Fallback intensity: $INTENSITY"
           fi
           
@@ -103,7 +122,12 @@ jobs:
             "date": "$(date +%Y-%m-%d)",
             "timestamp": $(date +%s)000,
             "updatedAt": "$(date)",
-            "source": "neynar-trending"
+            "source": "neynar-trending",
+            "metrics": {
+              "casts": $CAST_COUNT,
+              "avgEngagement": $AVG_ENGAGEMENT,
+              "dayOfMonth": $DAY
+            }
           }
           EOF
           
