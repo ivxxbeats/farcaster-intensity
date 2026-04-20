@@ -1,6 +1,7 @@
 {
-  "intensity": 0.50,
+  "intensity": .830,
   "date": "2026-04-20",
-  "timestamp": 1776662784000,
-  "updatedAt": "Mon Apr 20 05:26:24 UTC 2026"
+  "timestamp": 1776663646000,
+  "updatedAt": "Mon Apr 20 05:40:46 UTC 2026",
+  "source": "trending-feed"
 }
