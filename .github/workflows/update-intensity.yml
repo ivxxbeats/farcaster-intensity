@@ -1,16 +1,16 @@
-name: Update Intensity
+name: Update Intensity from Farcaster
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '20 22 * * *'
-
-permissions:
-  contents: write
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
     steps:
       - uses: actions/checkout@v4
       
@@ -18,23 +18,27 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
+      
       - name: Install requests
         run: pip install requests
-        
-      - name: Run intensity updater
+      
+      - name: Run intensity updater with Awakened Engine
         env:
           NEYNAR_API_KEY: ${{ secrets.NEYNAR_API_KEY }}
         run: |
+          echo "📡 Fetching Farcaster trending data..."
           python3 << 'EOF'
-          import json, datetime, os, requests
+          import json, datetime, os, requests, math
           
           api_key = os.environ.get("NEYNAR_API_KEY")
           
-          if not api_key:
-              intensity = 0.50
-              casts = likes = recasts = 0
-          else:
+          # Default values
+          intensity = 0.50
+          casts = 0
+          likes = 0
+          recasts = 0
+          
+          if api_key:
               try:
                   url = "https://api.neynar.com/v2/farcaster/feed/trending?limit=10&time_window=24h"
                   headers = {"accept": "application/json", "x-api-key": api_key}
@@ -45,6 +49,7 @@ jobs:
                   likes = sum(c.get("likes_count", 0) for c in data.get("casts", []))
                   recasts = sum(c.get("recasts_count", 0) for c in data.get("casts", []))
                   
+                  # Calculate scores
                   if casts >= 10: cast_score = 0.28
                   elif casts >= 7: cast_score = 0.22
                   elif casts >= 4: cast_score = 0.16
@@ -65,31 +70,92 @@ jobs:
                   
                   raw_score = cast_score + like_score + recast_score
                   intensity = round(0.12 + (raw_score * 0.68), 3)
+                  
               except Exception as e:
-                  print(f"Error: {e}")
+                  print(f"Error fetching data: {e}")
                   intensity = 0.50
-                  casts = likes = recasts = 0
+              
+              print(f"📊 Casts: {casts}, Likes: {likes}, Recasts: {recasts}")
+              print(f"🎨 Raw intensity: {intensity}")
           
+          # ============================================================
+          # AWAKENED ENGINE CALCULATIONS
+          # ============================================================
+          
+          # Thresholds decrease as intensity increases
+          awakened_threshold = round(0.55 - (intensity * 0.25), 3)
+          ascended_threshold = round(0.85 - (intensity * 0.2), 3)
+          
+          # Ensure thresholds stay in reasonable range
+          awakened_threshold = max(0.30, min(0.65, awakened_threshold))
+          ascended_threshold = max(0.60, min(0.90, ascended_threshold))
+          
+          # Effect multipliers scale with intensity
+          distortion_multiplier = round(0.7 + (intensity * 0.8), 3)
+          particle_multiplier = round(0.6 + (intensity * 1.4), 3)
+          color_intensity = round(0.8 + (intensity * 0.7), 3)
+          glitch_frequency = round(intensity * 0.12, 3)
+          
+          # Energy rings enabled at high intensity
+          energy_rings = intensity > 0.7
+          
+          # Progression level based on intensity
+          if intensity >= ascended_threshold:
+              progression = "ascended"
+          elif intensity >= awakened_threshold:
+              progression = "awakened"
+          else:
+              progression = "base"
+          
+          print(f"\n✨ AWAKENED ENGINE:")
+          print(f"   Progression: {progression}")
+          print(f"   Awakened at: {awakened_threshold}")
+          print(f"   Ascended at: {ascended_threshold}")
+          print(f"   Distortion: {distortion_multiplier}")
+          print(f"   Particles: {particle_multiplier}")
+          print(f"   Color: {color_intensity}")
+          print(f"   Glitch: {glitch_frequency}")
+          print(f"   Energy Rings: {energy_rings}")
+          
+          # Build output with Awakened Engine
           output = {
               "intensity": intensity,
+              "awakenedEngine": {
+                  "enabled": True,
+                  "progression": progression,
+                  "awakenedThreshold": awakened_threshold,
+                  "ascendedThreshold": ascended_threshold,
+                  "distortionMultiplier": distortion_multiplier,
+                  "particleMultiplier": particle_multiplier,
+                  "colorIntensity": color_intensity,
+                  "glitchFrequency": glitch_frequency,
+                  "energyRings": energy_rings
+              },
               "date": datetime.datetime.now().strftime("%Y-%m-%d"),
               "timestamp": int(datetime.datetime.now().timestamp() * 1000),
               "updatedAt": datetime.datetime.now().strftime("%a %b %d %H:%M:%S UTC %Y"),
-              "source": "farcaster-80pct",
-              "metrics": {"casts": casts, "likes": likes, "recasts": recasts}
+              "source": "farcaster-awakened",
+              "metrics": {
+                  "casts": casts,
+                  "likes": likes,
+                  "recasts": recasts
+              }
           }
           
+          # Write JSON
           with open("intensity.json", "w") as f:
               json.dump(output, f, indent=2)
               f.write("\n")
           
-          print(f"✅ Intensity updated to: {intensity}")
+          print(f"\n✅ Intensity updated to: {intensity}")
+          print(f"📁 Full output:")
+          print(json.dumps(output, indent=2))
           EOF
-          
+      
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add intensity.json
-          git commit -m "Update intensity [skip ci]" || echo "No changes"
+          git diff --staged --quiet || git commit -m "Update intensity with Awakened Engine [skip ci]"
           git push origin main
