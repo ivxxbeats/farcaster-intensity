@@ -1,22 +1,22 @@
 {
-  "intensity": 0.372,
+  "intensity": 0.331,
   "awakenedEngine": {
     "enabled": true,
     "progression": "base",
-    "awakenedThreshold": 0.457,
-    "ascendedThreshold": 0.776,
-    "distortionMultiplier": 0.998,
-    "particleMultiplier": 1.121,
-    "colorIntensity": 1.06,
-    "glitchFrequency": 0.045,
+    "awakenedThreshold": 0.467,
+    "ascendedThreshold": 0.784,
+    "distortionMultiplier": 0.965,
+    "particleMultiplier": 1.063,
+    "colorIntensity": 1.032,
+    "glitchFrequency": 0.04,
     "energyRings": false
   },
   "date": "2026-08-04",
-  "timestamp": 1785880670775,
-  "updatedAt": "Tue Aug 04 21:57:50 UTC 2026",
+  "timestamp": 1785884746104,
+  "updatedAt": "Tue Aug 04 23:05:46 UTC 2026",
   "source": "farcaster-awakened",
   "metrics": {
-    "casts": 10,
+    "casts": 9,
     "likes": 0,
     "recasts": 0
   }
